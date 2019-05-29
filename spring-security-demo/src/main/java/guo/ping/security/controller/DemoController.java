@@ -1,4 +1,4 @@
-package guo.ping.demo.controller;
+package guo.ping.security.controller;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;

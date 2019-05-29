@@ -24,8 +24,86 @@ Spring Security实现是靠Filter实现的，在请求真正达到资源之前�
 
 ![Spring Security过滤器链](E:\IDEA\spring-security-learn\readme.assets\1559110793113.png)
 
-
-
 ### 用户名密码模式
+
+**自定义用户认证逻辑**
+
+默认的用户名是 `user`，密码是每次系统启动随机生成的，这种方式显然是不常用的。通常我们的用户信息都是从数据库进行获取并校验的。自定义用户认证逻辑可以通过 `UserDetailsService` 接口来实现。自己编写的 `UserDetailsService` 接口的实现类只需要通过注解添加到Spring容器中即可。
+
+```java
+@Component
+public class MyUserDetailsService implements UserDetailsService {
+
+    private Logger logger = LoggerFactory.getLogger(getClass());
+
+    @Autowired
+    private BCryptPasswordEncoder bCryptPasswordEncoder;
+
+    /**
+     * 模拟从数据库中依据username查询具体的用户信息
+     * @param username
+     * @return
+     * @throws UsernameNotFoundException
+     */
+    @Override
+    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+
+        logger.info("start query user info from db by username = " + username);
+        // 第一次需要对用户的密码进行加密
+        String password = bCryptPasswordEncoder.encode("123456");
+        logger.info("query user password = " + password);
+
+        // 这个User对象时Spring中提供的，已经实现了UserDetails接口，UserDetails接口包含了用户的名称、密码、密码是否过期、账户是否冻结、是否删除、所拥有的权限等信息
+        // 我们自己写业务逻辑时，返回的User bean可以自己实现UserDetails接口
+        return new User(username, password, true,true,true,true, AuthorityUtils.commaSeparatedStringToAuthorityList("admin"));
+    }
+}
+```
+
+**个性化用户认证流程**
+
+通常项目中我们都会使用自己的登录页面，所以需要配置自定义的登陆页。同时登录成功与登录失败，可能不仅仅是默认的跳转动作那么简单，可能需要额外添加日志等等逻辑，那么需要我们自定义登录成功与失败的逻辑。
+
+自定义跳转的登录页逻辑：
+
+```java
+@Override
+protected void configure(HttpSecurity http) throws Exception {
+    http.formLogin()
+        .loginPage("/signIn.html")  // 指定登录页
+        .loginProcessingUrl("/authentication/form") // 指定登录表单信息提交处理请求，和登录页面中的需一致
+        .and()
+        .authorizeRequests()
+        .antMatchers("/signIn.html").permitAll() // 登录页无需认证
+        .anyRequest()
+        .authenticated()
+        .and()
+        .csrf().disable(); // 屏蔽跨站请求伪造
+}
+```
+
+自定义登陆页面：
+
+```html
+<form action="/authentication/form" method="post">
+    <table>
+        <tr>
+            <td>用户名:</td> 
+            <td><input type="text" name="username"></td>
+        </tr>
+        <tr>
+            <td>密码:</td>
+            <td><input type="password" name="password"></td>
+        </tr>
+        <tr>
+            <td colspan="2"><button type="submit">登录</button></td>
+        </tr>
+    </table>
+</form>
+```
+
+自定义登录成功与失败逻辑：
+
+
 
 ### 短信验证码模式
