@@ -161,6 +161,218 @@ protected void configure(HttpSecurity http) throws Exception {
 }
 ```
 
+**表单认证的原理**
 
+
+
+![1559185687245](E:\IDEA\spring-security-learn\readme.assets\1559185687245.png)
+
+**用户认证信息存储Session**
+
+用户认证得到的 `Authentication` 信息会被存储到 `SecurityContext` 中。
+
+![用户认证信息存储Session](E:\IDEA\spring-security-learn\readme.assets\1559222340513.png)
+
+
+
+`SecurityContextPersistenceFilter` 过滤器负责将用户认证信息存入Session。其位于过滤器链的最前端，也就是请求进入与响应出口都经过该过滤器。在**请求进入**时，它负责查看 `SecurityContext` 中是否含有认证信息，如果有就添加到 `SecurityContextHolder` 这个 `ThreadLocal` 中，没有则继续执行过滤器链；在**返回响应**时，检查线程中是否有认证信息，有认证信息则放入 `SecurityContext` 中。这样所有请求都会共享 `SecurityContext` 中的用户认证信息。
+
+![SecurityContextPersistenceFilter](E:\IDEA\spring-security-learn\readme.assets\1559222383495.png)
+
+
+
+**获取认证用户信息**
+
+通常认证成功的用户，我们会需要获取使用，所以Spring提供了对应参数解析器，直接能够获取到 `Authentication` 信息。
+
+```java
+@GetMapping("/me")
+public Object getCurrentUser(UserDetails user) {
+    return user;
+}
+```
+
+当然从上面用户信息存储Session的过程，我们也可以手动获取：
+
+```java
+@GetMapping("/me")
+public Object getCurrentUser() {
+    return SecurityContextHolder.getContext().getAuthentication();
+}
+```
+
+默认返回的 `Authentication` 信息包含了很多内容，可能我们仅仅想要其中的 `UserDetails`，`@AuthenticationPrincipal` 注解可以帮助我们：
+
+```java
+@GetMapping("/me")
+public Object getCurrentUser(@AuthenticationPrincipal UserDetails user) {
+    return user;
+}
+```
+
+**图片验证码**
+
+生成图片二维码方法：
+
+```java
+@Controller
+public class ValidateCodeController {
+
+    private static final String SESSION_KEY = "SESSION_KEY_IMAGE_CODE";
+
+    private SessionStrategy sessionStrategy = new HttpSessionSessionStrategy();
+
+    @GetMapping("/code/image")
+    public void createCode(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        ImageCode imageCode = createImageCode(request);
+        // 将二维码存入Session中，用于和用户输入校验
+        sessionStrategy.setAttribute(new ServletWebRequest(request), SESSION_KEY, imageCode);
+        // 将二维码图片写入response中
+        ImageIO.write(imageCode.getImage(), "JPEG", response.getOutputStream());
+    }
+
+    private ImageCode createImageCode(HttpServletRequest request) {
+        int width = 67;
+        int height = 23;
+        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+
+        Graphics g = image.getGraphics();
+
+        Random random = new Random();
+
+        g.setColor(getRandColor(200, 250));
+        g.fillRect(0, 0, width, height);
+        g.setFont(new Font("Times New Roman", Font.ITALIC, 20));
+        g.setColor(getRandColor(160, 200));
+        for (int i = 0; i < 155; i++) {
+            int x = random.nextInt(width);
+            int y = random.nextInt(height);
+            int xl = random.nextInt(12);
+            int yl = random.nextInt(12);
+            g.drawLine(x, y, x + xl, y + yl);
+        }
+
+        String sRand = "";
+        for (int i = 0; i < 4; i++) {
+            String rand = String.valueOf(random.nextInt(10));
+            sRand += rand;
+            g.setColor(new Color(20 + random.nextInt(110), 20 + random.nextInt(110), 20 + random.nextInt(110)));
+            g.drawString(rand, 13 * i + 6, 16);
+        }
+
+        g.dispose();
+
+        return new ImageCode(image, sRand, 60);
+    }
+
+    /**
+     * 生成随机背景条纹
+     * @param fc
+     * @param bc
+     * @return
+     */
+    private Color getRandColor(int fc, int bc) {
+        Random random = new Random();
+        if (fc > 255) {
+            fc = 255;
+        }
+        if (bc > 255) {
+            bc = 255;
+        }
+        int r = fc + random.nextInt(bc - fc);
+        int g = fc + random.nextInt(bc - fc);
+        int b = fc + random.nextInt(bc - fc);
+        return new Color(r, g, b);
+    }
+}
+```
+
+**校验二维码内容是否匹配**
+
+自定义验证码过滤器：
+
+```java
+public class ValidateCodeFilter extends OncePerRequestFilter {
+    // OncePerRequestFilter是Spring提供的工具类，保证过滤器每次只调用一次
+
+    private AuthenticationFailureHandler myAuthenticationFailureHandler;
+
+    private SessionStrategy sessionStrategy = new HttpSessionSessionStrategy();
+
+    public void setMyAuthenticationFailureHandler(AuthenticationFailureHandler myAuthenticationFailureHandler) {
+        this.myAuthenticationFailureHandler = myAuthenticationFailureHandler;
+    }
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest httpServletRequest, HttpServletResponse httpServletResponse, FilterChain filterChain)
+            throws ServletException, IOException {
+        // 如果是用户认证请求，才会去校验验证码逻辑，否则直接放行
+        if (StringUtils.equals("/user/authentication", httpServletRequest.getRequestURI())
+                && StringUtils.equalsIgnoreCase(httpServletRequest.getMethod(), "post")) {
+
+            try {
+                validate(new ServletWebRequest(httpServletRequest));
+                logger.info("验证码校验通过");
+            } catch (ValidateCodeException exception) {
+                myAuthenticationFailureHandler.onAuthenticationFailure(httpServletRequest, httpServletResponse, exception);
+                return;
+            }
+        }
+
+        // 只有验证成功，才继续放行
+        filterChain.doFilter(httpServletRequest, httpServletResponse);
+    }
+
+    private void validate(ServletWebRequest servletWebRequest) throws ServletRequestBindingException {
+        ImageCode codeInSession = (ImageCode) sessionStrategy.getAttribute(servletWebRequest, ValidateCodeController.SESSION_KEY);
+
+        String codeInRequest = ServletRequestUtils.getStringParameter(servletWebRequest.getRequest(), "imageCode");
+
+        if (StringUtils.isBlank(codeInRequest)) {
+            throw new ValidateCodeException("验证码的值不能为空");
+        }
+
+        if (codeInSession == null) {
+            throw new ValidateCodeException("验证码不存在");
+        }
+
+        if (codeInSession.isExpried()) {
+            sessionStrategy.removeAttribute(servletWebRequest, ValidateCodeController.SESSION_KEY);
+            throw new ValidateCodeException("验证码已过期");
+        }
+
+        if (!StringUtils.equals(codeInSession.getCode(), codeInRequest)) {
+            throw new ValidateCodeException("验证码不匹配");
+        }
+
+        sessionStrategy.removeAttribute(servletWebRequest, ValidateCodeController.SESSION_KEY);
+    }
+}
+```
+
+在表单登录过滤器前添加上一个验证码过滤器：
+
+```java
+ @Override
+protected void configure(HttpSecurity http) throws Exception {
+    ValidateCodeFilter validateCodeFilter = new ValidateCodeFilter();
+    validateCodeFilter.setMyAuthenticationFailureHandler(myAuthenticationFailureHandler);
+
+    // 在表单登录过滤器前添加上一个验证码过滤器
+    http.addFilterBefore(validateCodeFilter, UsernamePasswordAuthenticationFilter.class)
+        .formLogin()
+        .loginPage("/user/login")
+        .loginProcessingUrl("/user/authentication")
+        .successHandler(myAuthenticationSuccessHandler)
+        .failureHandler(myAuthenticationFailureHandler)
+        .and()
+        .authorizeRequests()
+        .antMatchers("/user/login", securityProperties.getBrowser().getLoginPage(), "/code/image").permitAll()
+        .anyRequest()
+        .authenticated()
+        .and()
+        .csrf().disable();
+}
+```
 
 ### 短信验证码模式
