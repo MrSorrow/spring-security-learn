@@ -102,7 +102,64 @@ protected void configure(HttpSecurity http) throws Exception {
 </form>
 ```
 
-自定义登录成功与失败逻辑：
+自定义登录成功逻辑主要编写 `AuthenticationSuccessHandler` 接口的实现类：
+
+```java
+@Component
+public class MyAuthenticationSuccessHandler implements AuthenticationSuccessHandler {
+
+    private Logger logger = LoggerFactory.getLogger(getClass());
+
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    // Authentication封装了认证信息，包括认证请求的session、ip，认证成功的用户信息等
+    @Override
+    public void onAuthenticationSuccess(HttpServletRequest httpServletRequest, HttpServletResponse httpServletResponse, Authentication authentication) throws IOException, ServletException {
+        logger.info("登录成功");
+        logger.info("authentication 包含 " + objectMapper.writeValueAsString(authentication));
+    }
+}
+```
+
+自定义登录失败逻辑主要编写 `AuthenticationFailureHandler` 接口的实现类：
+
+```java
+@Component
+public class MyAuthenticationFailureHandler implements AuthenticationFailureHandler {
+
+    private Logger logger = LoggerFactory.getLogger(getClass());
+
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    @Override
+    public void onAuthenticationFailure(HttpServletRequest httpServletRequest, HttpServletResponse httpServletResponse, AuthenticationException e) throws IOException, ServletException {
+        logger.info("登录失败");
+        logger.info("authentication 包含 " + objectMapper.writeValueAsString(e));
+    }
+}
+```
+
+注册自定义的登录成功与失败处理器：
+
+```java
+@Override
+protected void configure(HttpSecurity http) throws Exception {
+    http.formLogin()
+        .loginPage("/user/login")
+        .loginProcessingUrl("/user/authentication")
+        .successHandler(myAuthenticationSuccessHandler)  // 登录成功
+        .failureHandler(myAuthenticationFailureHandler)  // 登录失败
+        .and()
+        .authorizeRequests()
+        .antMatchers("/user/login", securityProperties.getBrowser().getLoginPage()).permitAll()
+        .anyRequest()
+        .authenticated()
+        .and()
+        .csrf().disable();
+}
+```
 
 
 
