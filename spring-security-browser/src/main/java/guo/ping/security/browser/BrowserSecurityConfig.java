@@ -1,5 +1,6 @@
 package guo.ping.security.browser;
 
+import guo.ping.security.browser.session.MyExpiredSessionStrategy;
 import guo.ping.security.core.properties.SecurityProperties;
 import guo.ping.security.core.validate.code.ValidateCodeFilter;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -68,9 +69,15 @@ public class BrowserSecurityConfig extends WebSecurityConfigurerAdapter {
                     .failureHandler(myAuthenticationFailureHandler)
             .and()
                 .rememberMe()
-                .tokenRepository(persistentTokenRepository())
-                .tokenValiditySeconds(securityProperties.getBrowser().getRememberMeSeconds())
-                .userDetailsService(myUserDetailsService)
+                    .tokenRepository(persistentTokenRepository())
+                    .tokenValiditySeconds(securityProperties.getBrowser().getRememberMeSeconds())
+                    .userDetailsService(myUserDetailsService)
+            .and()
+                .sessionManagement()
+                    .invalidSessionUrl("/session/invaild")
+                    .maximumSessions(1)
+                    .expiredSessionStrategy(new MyExpiredSessionStrategy())
+                    .and()
             .and()
                 .authorizeRequests()  // 对请求进行授权
                     .antMatchers("/user/login", securityProperties.getBrowser().getLoginPage(), "/code/image").permitAll() // 登录页无需认证
