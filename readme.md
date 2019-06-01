@@ -350,7 +350,7 @@ public class ValidateCodeFilter extends OncePerRequestFilter {
 }
 ```
 
-在表单登录过滤器前添加上一个验证码过滤器：
+在表单登录过滤器 `UsernamePasswordAuthenticationFilter` 前添加上一个验证码过滤器：
 
 ```java
  @Override
@@ -375,4 +375,88 @@ protected void configure(HttpSecurity http) throws Exception {
 }
 ```
 
+**记住我功能**
+
+当通过表单认证成功后，会利用 `RememberMeService` 生成一个随机 Token 写入浏览器Cookie中，并通过 `TokenRepository` 将 Token 和 认证信息的 `userId` 对应存入数据库中。当服务请求时，会经过过滤器链中的 `RememberMeAuthenticationFilter` 过滤器根据Cookie的 Token 值去数据库查询用户信息。
+
+![记住我](E:\IDEA\spring-security-learn\readme.assets\1559368746482.png)
+
+表单上需要添加一个固定 `name=remember-me` 的勾选框：
+
+```html
+<tr>
+    <td colspan="2">
+        <input type="checkbox" name="remember-me" value="true">记住我
+    </td>
+</tr>
+```
+
+注入 `PersistentTokenRepository` 进入Spring容器：
+
+```java
+@Autowired
+private DataSource dataSource;
+
+@Bean
+public PersistentTokenRepository persistentTokenRepository() {
+    JdbcTokenRepositoryImpl jdbcTokenRepository = new JdbcTokenRepositoryImpl();
+    jdbcTokenRepository.setDataSource(dataSource);
+    return jdbcTokenRepository;
+}
+```
+
+配置记住我相关配置：
+
+```java
+@Override
+protected void configure(HttpSecurity http) throws Exception {
+    ValidateCodeFilter validateCodeFilter = new ValidateCodeFilter();
+    validateCodeFilter.setMyAuthenticationFailureHandler(myAuthenticationFailureHandler);
+
+    http.addFilterBefore(validateCodeFilter, UsernamePasswordAuthenticationFilter.class)
+            .formLogin()
+            .loginPage("/user/login")
+            .loginProcessingUrl("/user/authentication")
+            .successHandler(myAuthenticationSuccessHandler)
+            .failureHandler(myAuthenticationFailureHandler)
+        .and()
+        	// 记住我
+            .rememberMe()
+        	// TokenRepository
+            .tokenRepository(persistentTokenRepository())
+        	// 过期时间
+            .tokenValiditySeconds(securityProperties.getBrowser().getRememberMeSeconds())
+            // UserDetailsService
+        	.userDetailsService(myUserDetailsService)
+        .and()
+            .authorizeRequests()
+            .antMatchers("/user/login", securityProperties.getBrowser().getLoginPage(), "/code/image").permitAll()
+            .anyRequest()
+            .authenticated()
+        .and()
+        	.csrf().disable();
+}
+```
+
+运行测试，勾选 `remember-me` 复选框，会在数据库中插入记录。
+
+![自动生成的表名称](E:\IDEA\spring-security-learn\readme.assets\1559374760331.png)
+
 ### 短信验证码模式
+
+**生成短信验证码**
+
+类似生成图片数字验证码一样，原理比数字验证码更简单一些。
+
+**短信验证码认证流程**
+
+参考表单认证方式，表单登录的请求会经过 `UsernamePasswordAuthenticationFilter` 过滤器，过滤器会将输入的用户名密码组装成一个 `UsernamePasswordAuthenticationToken` 的 TOKEN，将其传给 `AuthenticationManager`， `AuthenticationManager` 会从一堆 `xxxProviders` 中去寻找 `support` 该 TOKEN 类型的 `DaoAuthenticationProvider`。`DaoAuthenticationProvider` 会具体的认证输入的用户信息是否正确。
+
+![表单登录方式](E:\IDEA\spring-security-learn\readme.assets\1559375696333.png)
+
+依照表单认证流程，短信验证方式也可以进行同样的设计。我们设计一个新的过滤器 `SmsAuthenticationFilter`，用于短信方式认证。它将用户输入的手机号信息封装成自定义的 `SmsAuthenticationToken`，配套定义一个 `support` 该 TOKEN 类型的 `SmsAuthenticationProvider`。
+
+![短信验证方式](E:\IDEA\spring-security-learn\readme.assets\1559376348604.png)
+
+关于验证短信验证码的正确与否逻辑，则可以完全参照图形验证码逻辑，在过滤器链前面添加一个新的校验验证码的过滤器。
+

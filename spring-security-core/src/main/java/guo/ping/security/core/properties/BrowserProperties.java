@@ -10,6 +10,15 @@ public class BrowserProperties {
 
     private String loginPage = "/signIn.html";
     private LoginType loginType = LoginType.JSON;
+    private Integer rememberMeSeconds = 3600;
+
+    public Integer getRememberMeSeconds() {
+        return rememberMeSeconds;
+    }
+
+    public void setRememberMeSeconds(Integer rememberMeSeconds) {
+        this.rememberMeSeconds = rememberMeSeconds;
+    }
 
     public String getLoginPage() {
         return loginPage;
