@@ -427,7 +427,7 @@ protected void configure(HttpSecurity http) throws Exception {
         	// 过期时间
             .tokenValiditySeconds(securityProperties.getBrowser().getRememberMeSeconds())
             // UserDetailsService
-        	.userDetailsService(myUserDetailsService)
+        	.userDetailsService(userDetailsService)
         .and()
             .authorizeRequests()
             .antMatchers("/user/login", securityProperties.getBrowser().getLoginPage(), "/code/image").permitAll()
@@ -459,4 +459,100 @@ protected void configure(HttpSecurity http) throws Exception {
 ![短信验证方式](E:\IDEA\spring-security-learn\readme.assets\1559376348604.png)
 
 关于验证短信验证码的正确与否逻辑，则可以完全参照图形验证码逻辑，在过滤器链前面添加一个新的校验验证码的过滤器。
+
+定义 `SmsCodeAuthenticationToken`：
+
+```java
+public class SmsCodeAuthenticationToken extends AbstractAuthenticationToken {
+
+    private final Object mobile;
+
+    public SmsCodeAuthenticationToken(Object mobile) {
+        super((Collection)null);
+        this.mobile = mobile;
+        this.setAuthenticated(false);
+    }
+
+    public SmsCodeAuthenticationToken(Object mobile, Collection<? extends GrantedAuthority> authorities) {
+        super(authorities);
+        this.mobile = mobile;
+        super.setAuthenticated(true);
+    }
+
+    public Object getCredentials() {
+        return null;
+    }
+
+    public Object getPrincipal() {
+        return this.mobile;
+    }
+
+    public void setAuthenticated(boolean isAuthenticated) throws IllegalArgumentException {
+        if (isAuthenticated) {
+            throw new IllegalArgumentException("Cannot set this token to trusted - use constructor which takes a GrantedAuthority list instead");
+        } else {
+            super.setAuthenticated(false);
+        }
+    }
+
+    public void eraseCredentials() {
+        super.eraseCredentials();
+    }
+}
+```
+
+定义 `SmsCodeAuthenticationFilter` ：
+
+```java
+public class SmsCodeAuthenticationFilter extends AbstractAuthenticationProcessingFilter {
+
+    public static final String SPRING_SECURITY_FORM_MOBILE_KEY = "mobile";
+    private String mobileParameter = "username";
+    private boolean postOnly = true;
+
+    public SmsCodeAuthenticationFilter() {
+        // 配置需要处理的请求，也就是短信登录表单提交的请求地址
+        super(new AntPathRequestMatcher("/authentication/mobile", "POST"));
+    }
+
+    public Authentication attemptAuthentication(HttpServletRequest request, HttpServletResponse response) throws AuthenticationException {
+        if (this.postOnly && !request.getMethod().equals("POST")) {
+            throw new AuthenticationServiceException("Authentication method not supported: " + request.getMethod());
+        } else {
+            String mobile = this.obtainUsername(request);
+            if (mobile == null) {
+                mobile = "";
+            }
+
+            mobile = mobile.trim();
+            SmsCodeAuthenticationToken authRequest = new SmsCodeAuthenticationToken(mobile);
+            this.setDetails(request, authRequest);
+            return this.getAuthenticationManager().authenticate(authRequest);
+        }
+    }
+
+    protected String obtainUsername(HttpServletRequest request) {
+        return request.getParameter(this.mobileParameter);
+    }
+
+    protected void setDetails(HttpServletRequest request, SmsCodeAuthenticationToken authRequest) {
+        authRequest.setDetails(this.authenticationDetailsSource.buildDetails(request));
+    }
+
+    public void setMobileParameter(String mobileParameter) {
+        Assert.hasText(mobileParameter, "Username parameter must not be empty or null");
+        this.mobileParameter = mobileParameter;
+    }
+
+    public void setPostOnly(boolean postOnly) {
+        this.postOnly = postOnly;
+    }
+
+    public final String getMobileParameter() {
+        return this.mobileParameter;
+    }
+}
+```
+
+定义：
 
